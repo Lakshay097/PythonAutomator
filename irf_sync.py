@@ -2,7 +2,7 @@ import os
 import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from jotform_api import JotformAPIClient
+from jotform import JotformAPIClient
 from http.client import IncompleteRead
 
 def col_letter(n):
