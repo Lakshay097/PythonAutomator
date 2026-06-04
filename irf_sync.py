@@ -26,7 +26,7 @@ SLEEP_BETWEEN_CALLS = 1
 
 # ---------------- JOTFORM (custom enterprise server) ----------------
 jotform = JotformAPIClient(API_KEY)
-jotform.set_base_url('https://pw.jotform.com/API/')
+jotform.set_baseurl('https://pw.jotform.com/API/')
 
 # ---------------- GOOGLE SHEETS ----------
 scope = [
