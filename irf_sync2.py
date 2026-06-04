@@ -2,7 +2,7 @@ import os
 import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from jotform_api import JotformAPIClient
+from jotform import JotformAPIClient
 from http.client import IncompleteRead
 
 def col_letter(n):
@@ -24,8 +24,9 @@ TOTAL_LIMIT         = 8000
 PAGE_SIZE           = 200
 SLEEP_BETWEEN_CALLS = 1
 
-# ---------------- JOTFORM ----------------
+# ---------------- JOTFORM (custom enterprise server) ----------------
 jotform = JotformAPIClient(API_KEY)
+jotform.set_baseurl('https://pw.jotform.com/API/')
 
 # ---------------- GOOGLE SHEETS ----------
 scope = [
