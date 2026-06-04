@@ -24,8 +24,9 @@ TOTAL_LIMIT         = 8000
 PAGE_SIZE           = 200
 SLEEP_BETWEEN_CALLS = 1
 
-# ---------------- JOTFORM ----------------
+# ---------------- JOTFORM (custom enterprise server) ----------------
 jotform = JotformAPIClient(API_KEY)
+jotform.set_base_url('https://pw.jotform.com/API/')
 
 # ---------------- GOOGLE SHEETS ----------
 scope = [
@@ -96,10 +97,10 @@ while fetched < TOTAL_LIMIT:
 
         for sub in submissions:
             row_data = {
-                'Submission ID':   sub.get('id'),
-                'Submission Date': sub.get('created_at', ''),
+                'Submission ID':    sub.get('id'),
+                'Submission Date':  sub.get('created_at', ''),
                 'Last Update Date': sub.get('updated_at', ''),
-                'Approval Status': (
+                'Approval Status':  (
                     sub.get('workflowStatus')
                     or sub.get('workflow_status')
                     or sub.get('status')
