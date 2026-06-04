@@ -1,11 +1,11 @@
-name: Sync Both Sheets (10 AM + 10:30 AM IST)
+name: Sync Both Sheets (10 AM + 10:15 AM IST)
 
 on:
   schedule:
     # 10:00 AM IST = 04:30 UTC
     - cron: '30 4 * * *'
-    # 10:30 AM IST = 05:00 UTC
-    - cron: '0 5 * * *'
+    # 10:15 AM IST = 04:45 UTC
+    - cron: '45 4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -45,9 +45,9 @@ jobs:
         run: rm -f credentials.json
 
   sync-sheet-2:
-    name: Sync → IRF AdminSheet (10:30 AM IST)
+    name: Sync → IRF AdminSheet (10:15 AM IST)
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 5 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '45 4 * * *' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout repo
