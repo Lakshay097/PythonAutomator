@@ -77,4 +77,4 @@ jobs:
 
       - name: Clean up credentials
         if: always()
-        run: rm -f credentials.json
+        run: rm -f credentials.json# trigger
