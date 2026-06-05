@@ -1,25 +1,22 @@
-name: Sync Both Sheets (10 AM + 10:15 AM IST)
+name: Sync Sheet 1 - IRF Data (10 AM IST)
 
 on:
   schedule:
     # 10:00 AM IST = 04:30 UTC
     - cron: '30 4 * * *'
-    # 10:15 AM IST = 04:45 UTC
-    - cron: '45 4 * * *'
   workflow_dispatch:
 
 jobs:
   sync-sheet-1:
     name: Sync → IRF Data sheet (10 AM IST)
     runs-on: ubuntu-latest
-    if: github.event.schedule == '30 4 * * *' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
@@ -39,41 +36,6 @@ jobs:
           GOOGLE_WORKSHEET_NAME:   ${{ secrets.GOOGLE_WORKSHEET_NAME }}
           GOOGLE_CREDENTIALS_PATH: credentials.json
         run: python irf_sync.py
-
-      - name: Clean up credentials
-        if: always()
-        run: rm -f credentials.json
-
-  sync-sheet-2:
-    name: Sync → IRF AdminSheet (10:15 AM IST)
-    runs-on: ubuntu-latest
-    if: github.event.schedule == '45 4 * * *' || github.event_name == 'workflow_dispatch'
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4.2.2
-
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5.6.0
-        with:
-          python-version: '3.13'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Write Google credentials to file
-        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
-
-      - name: Run irf_sync2.py
-        env:
-          JOTFORM_API_KEY:         ${{ secrets.JOTFORM_API_KEY }}
-          JOTFORM_FORM_ID:         ${{ secrets.JOTFORM_FORM_ID }}
-          GOOGLE_SHEET_NAME_2:     ${{ secrets.GOOGLE_SHEET_NAME_2 }}
-          GOOGLE_WORKSHEET_NAME_2: ${{ secrets.GOOGLE_WORKSHEET_NAME_2 }}
-          GOOGLE_CREDENTIALS_PATH: credentials.json
-        run: python irf_sync2.py
 
       - name: Clean up credentials
         if: always()
