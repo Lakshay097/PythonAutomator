@@ -5,6 +5,8 @@ on:
     # 10:00 AM IST = 04:30 UTC
     - cron: '20 4 * * *'
   workflow_dispatch:
+  push:
+    branches: [main]
 
 jobs:
   sync-sheet-1:
