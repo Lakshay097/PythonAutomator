@@ -15,7 +15,7 @@ BASE_URL         = os.environ.get('JOTFORM_BASE_URL', 'https://pw.jotform.com/AP
 SPREADSHEET_NAME = os.environ.get('GOOGLE_SHEET_NAME_3', 'test')
 WORKSHEET_NAME   = os.environ.get('GOOGLE_WORKSHEET_NAME_3', 'testing')
 START_DATE       = os.environ.get('START_DATE', '2025-10-01 00:00:00')
-CREDENTIALS      = os.environ.get('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
+CREDENTIALS      = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
 
 PAGE_SIZE           = 100
 SLEEP_BETWEEN_CALLS = 1

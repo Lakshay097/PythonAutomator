@@ -36,7 +36,7 @@ API_KEY        = os.environ['JOTFORM_API_KEY']
 FORM_ID        = os.environ['JOTFORM_FORM_ID']
 SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME', 'IRF Data sheet-version 2.0')
 WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME', 'IRF 2.0 Updated')
-CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
+CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
 
 TOTAL_LIMIT         = 8000
 PAGE_SIZE           = 200
