@@ -39,7 +39,11 @@ except WorksheetNotFound:
     sheet = spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows=1000, cols=10)
 
 headers = ['Approval Status', 'Unique ID', 'Last Update Date']
-sheet.clear()
+# Clear only columns A:C (preserve formulas in col D onward)
+last_row = len(sheet.get_all_values()) or 1
+if last_row > 1:
+    sheet.batch_clear([f'A2:C{last_row}'])  # clear data rows in A:C only
+
 sheet.update('A1', [headers])
 
 
