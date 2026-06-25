@@ -38,7 +38,7 @@ SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME_2', 'IRF_2.0_AdminSheet- 7 Ja
 WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME_2', 'IRF 2.0 Updated')
 CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
 
-TOTAL_LIMIT         = 8000
+TOTAL_LIMIT         = 16000
 PAGE_SIZE           = 200
 SLEEP_BETWEEN_CALLS = 1
 WRITE_BATCH_SIZE    = 500   # rows per Google Sheets API write call
