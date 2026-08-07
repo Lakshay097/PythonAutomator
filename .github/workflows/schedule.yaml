@@ -10,10 +10,10 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
@@ -25,14 +25,24 @@ jobs:
       - name: Write Google credentials to file
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
-      - name: Run irf_sync.py
+      - name: Run irf_sync.py with retry
         env:
           JOTFORM_API_KEY:         ${{ secrets.JOTFORM_API_KEY }}
           JOTFORM_FORM_ID:         ${{ secrets.JOTFORM_FORM_ID }}
           GOOGLE_SHEET_NAME:       ${{ secrets.GOOGLE_SHEET_NAME }}
           GOOGLE_WORKSHEET_NAME:   ${{ secrets.GOOGLE_WORKSHEET_NAME }}
           GOOGLE_CREDENTIALS_PATH: credentials.json
-        run: python irf_sync.py
+        run: |
+          for i in {1..3}; do
+            if python irf_sync.py; then
+              exit 0
+            else
+              echo "Attempt $i failed, retrying in 5s..."
+              sleep 5
+            fi
+          done
+          echo "All retry attempts failed"
+          exit 1
 
       - name: Clean up credentials
         if: always()
@@ -45,10 +55,10 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
@@ -60,14 +70,24 @@ jobs:
       - name: Write Google credentials to file
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
-      - name: Run irf_sync2.py
+      - name: Run irf_sync2.py with retry
         env:
           JOTFORM_API_KEY:         ${{ secrets.JOTFORM_API_KEY }}
           JOTFORM_FORM_ID:         ${{ secrets.JOTFORM_FORM_ID }}
           GOOGLE_SHEET_NAME_2:     ${{ secrets.GOOGLE_SHEET_NAME_2 }}
           GOOGLE_WORKSHEET_NAME_2: ${{ secrets.GOOGLE_WORKSHEET_NAME_2 }}
           GOOGLE_CREDENTIALS_PATH: credentials.json
-        run: python irf_sync2.py
+        run: |
+          for i in {1..3}; do
+            if python irf_sync2.py; then
+              exit 0
+            else
+              echo "Attempt $i failed, retrying in 5s..."
+              sleep 5
+            fi
+          done
+          echo "All retry attempts failed"
+          exit 1
 
       - name: Clean up credentials
         if: always()
@@ -80,10 +100,10 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
@@ -95,7 +115,7 @@ jobs:
       - name: Write Google credentials to file
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
-      - name: Run irf_sync3.py
+      - name: Run irf_sync3.py with retry
         env:
           JOTFORM_API_KEY:         ${{ secrets.JOTFORM_API_KEY }}
           JOTFORM_FORM_ID:         ${{ secrets.JOTFORM_FORM_ID }}
@@ -104,7 +124,17 @@ jobs:
           GOOGLE_WORKSHEET_NAME_3: ${{ secrets.GOOGLE_WORKSHEET_NAME_3 }}
           START_DATE:              ${{ secrets.START_DATE }}
           GOOGLE_CREDENTIALS_PATH: credentials.json
-        run: python irf_sync3.py
+        run: |
+          for i in {1..3}; do
+            if python irf_sync3.py; then
+              exit 0
+            else
+              echo "Attempt $i failed, retrying in 5s..."
+              sleep 5
+            fi
+          done
+          echo "All retry attempts failed"
+          exit 1
 
       - name: Clean up credentials
         if: always()
