@@ -1,8 +1,10 @@
 import os
 import json
 import time
+import random
 import requests
 import gspread
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread.exceptions import WorksheetNotFound
 from requests.exceptions import ConnectionError as RequestsConnectionError
@@ -17,10 +19,16 @@ WORKSHEET_NAME   = os.environ.get('GOOGLE_WORKSHEET_NAME_3', 'testing')
 START_DATE       = os.environ.get('START_DATE', '2025-10-01 00:00:00')
 CREDENTIALS      = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
 
-PAGE_SIZE           = 100
-SLEEP_BETWEEN_CALLS = 1
-MAX_PAGES           = 500
-WRITE_BATCH_SIZE    = 500   # rows per Google Sheets API write call
+PAGE_SIZE             = 100
+SLEEP_BETWEEN_BATCHES = 5     # wait between batches of parallel fetches
+MAX_PAGES             = 500
+WRITE_BATCH_SIZE      = 500   # rows per Google Sheets API write call
+MAX_WORKERS           = 2     # fewer concurrent requests to go easy on Jotform
+
+# Fetch retry settings
+FETCH_RETRIES       = 6
+FETCH_BACKOFF_BASE  = 3       # bigger base -> longer waits: 3,9,27,81,243s...
+FETCH_MAX_WAIT       = 60     # cap any single wait at 60s
 
 
 # ---------------- GOOGLE SHEETS ----------------
@@ -39,16 +47,19 @@ except WorksheetNotFound:
     sheet = spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows=1000, cols=10)
 
 headers = ['Approval Status', 'Unique ID', 'Last Update Date']
-# Clear only columns A:C (preserve formulas in col D onward)
-last_row = len(sheet.get_all_values()) or 1
-if last_row > 1:
-    sheet.batch_clear([f'A2:C{last_row}'])  # clear data rows in A:C only
 
-sheet.update('A1', [headers])
+# Only write headers if the sheet is empty — never clear existing data
+existing_values = sheet.get_all_values()
+if not existing_values:
+    sheet.update('A1', [headers])
 
 
 # ---------------- HELPERS ----------------
 def fetch_submissions(offset=0, limit=100):
+    """Fetch a page of submissions from the Jotform API with retry on transient errors.
+
+    Raises on persistent failure or on 4xx client errors (which are not retried).
+    """
     url = f"{BASE_URL}/form/{FORM_ID}/submissions"
     params = {
         'apiKey': API_KEY,
@@ -60,14 +71,48 @@ def fetch_submissions(offset=0, limit=100):
             'created_at:gt': START_DATE
         })
     }
-    response = requests.get(url, params=params, timeout=60)
-    response.raise_for_status()
-    data = response.json()
 
-    if data.get('responseCode') != 200:
-        raise Exception(f"Jotform API error: {data}")
+    response = None
+    for attempt in range(FETCH_RETRIES):
+        try:
+            response = requests.get(url, params=params, timeout=60)
+            # If the server returns 5xx, treat as transient and retry
+            if response.status_code >= 500:
+                raise requests.exceptions.HTTPError(f"{response.status_code} Server Error", response=response)
 
-    return data.get('content', [])
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get('responseCode') != 200:
+                # API returned an error payload despite HTTP 200
+                raise Exception(f"Jotform API error: {data}")
+
+            return data.get('content', [])
+
+        except (RequestsConnectionError, requests.exceptions.Timeout, requests.exceptions.HTTPError) as e:
+            # If it's a client error (4xx) we should not retry
+            if isinstance(e, requests.exceptions.HTTPError) and response is not None:
+                status = getattr(response, 'status_code', None)
+                if status and 400 <= status < 500:
+                    raise
+
+            if attempt < FETCH_RETRIES - 1:
+                wait = min((FETCH_BACKOFF_BASE ** attempt) + random.uniform(0, 2), FETCH_MAX_WAIT)
+                print(f"⚠️  Fetch failed (attempt {attempt + 1}/{FETCH_RETRIES}) for offset {offset}, retrying in {wait:.1f}s... [{e}]")
+                time.sleep(wait)
+                continue
+            else:
+                # Exhausted retries
+                print(f"❌ Failed to fetch submissions for offset {offset} after {FETCH_RETRIES} attempts: {e}")
+                raise
+
+
+def fetch_page(page_num):
+    """Wrapper so we can submit (page_num -> submissions) to the thread pool."""
+    time.sleep(random.uniform(0, 1.5))  # stagger thread start times
+    offset = page_num * PAGE_SIZE
+    submissions = fetch_submissions(offset=offset, limit=PAGE_SIZE)
+    return page_num, submissions
 
 
 def extract_unique_id(answers):
@@ -92,44 +137,70 @@ def append_with_retry(sheet, batch, retries=3):
                 raise
 
 
-# ---------------- FETCH & WRITE (streaming batches) ----------------
+# ---------------- FETCH (parallel, throttled) & WRITE (sequential, ordered) ----------------
 rows_buffer   = []
 total_written = 0
-offset        = 0
 page          = 0
+stop_fetching = False
 
-print("🚀 Fetching submissions...")
+print(f"🚀 Fetching submissions with {MAX_WORKERS} parallel workers (throttled)...")
 
-while page < MAX_PAGES:
-    submissions = fetch_submissions(offset=offset, limit=PAGE_SIZE)
+with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    while not stop_fetching and page < MAX_PAGES:
+        batch_page_nums = list(range(page, min(page + MAX_WORKERS, MAX_PAGES)))
 
-    if not submissions:
-        break
+        futures = {executor.submit(fetch_page, p): p for p in batch_page_nums}
 
-    for sub in submissions:
-        answers          = sub.get('answers', {})
-        approval_status  = sub.get('workflowStatus', '')
-        unique_id        = extract_unique_id(answers)
-        last_update_date = sub.get('updated_at', '')
+        results = {}
+        fetch_error = None
+        for fut in as_completed(futures):
+            p = futures[fut]
+            try:
+                page_num, submissions = fut.result()
+                results[page_num] = submissions
+            except Exception as e:
+                fetch_error = e
+                print(f"❌ Error fetching page {p} (offset {p * PAGE_SIZE}): {e}")
 
-        rows_buffer.append([
-            approval_status,
-            unique_id,
-            last_update_date
-        ])
+        if fetch_error is not None:
+            print("Aborting sync. You can re-run the job to resume from the last written offset.")
+            stop_fetching = True
+            break
 
-    # Flush buffer to Sheets whenever it reaches WRITE_BATCH_SIZE
-    if len(rows_buffer) >= WRITE_BATCH_SIZE:
-        append_with_retry(sheet, rows_buffer)
-        total_written += len(rows_buffer)
-        print(f"📝 Written {total_written} rows so far...")
-        rows_buffer = []
-        time.sleep(2)   # brief pause after each write
+        # Process results IN ORDER (page_num ascending) to keep row order deterministic
+        for p in batch_page_nums:
+            submissions = results.get(p, [])
 
-    offset += PAGE_SIZE
-    page   += 1
-    print(f"✔ Pulled {total_written + len(rows_buffer)} rows so far...")
-    time.sleep(SLEEP_BETWEEN_CALLS)
+            if not submissions:
+                stop_fetching = True
+                break
+
+            for sub in submissions:
+                answers          = sub.get('answers', {})
+                approval_status  = sub.get('workflowStatus', '')
+                unique_id        = extract_unique_id(answers)
+                last_update_date = sub.get('updated_at', '')
+
+                rows_buffer.append([
+                    approval_status,
+                    unique_id,
+                    last_update_date
+                ])
+
+        # Flush buffer to Sheets whenever it reaches WRITE_BATCH_SIZE
+        if len(rows_buffer) >= WRITE_BATCH_SIZE:
+            append_with_retry(sheet, rows_buffer)
+            total_written += len(rows_buffer)
+            print(f"📝 Written {total_written} rows so far...")
+            rows_buffer = []
+            time.sleep(2)
+
+        page += len(batch_page_nums)
+        print(f"✔ Pulled {total_written + len(rows_buffer)} rows so far (through page {page})...")
+
+        if not stop_fetching:
+            print(f"⏳ Waiting {SLEEP_BETWEEN_BATCHES}s before next batch...")
+            time.sleep(SLEEP_BETWEEN_BATCHES)
 
 # ---------------- FLUSH REMAINING ROWS ----------------
 if rows_buffer:
