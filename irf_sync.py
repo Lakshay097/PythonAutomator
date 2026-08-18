@@ -1,8 +1,8 @@
 import os
 import time
+import requests
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from jotform import JotformAPIClient
 from http.client import IncompleteRead
 from requests.exceptions import ConnectionError as RequestsConnectionError
 
@@ -14,6 +14,62 @@ def col_letter(n):
         n, rem = divmod(n - 1, 26)
         result = chr(65 + rem) + result
     return result
+
+
+def get_approval_status(sub):
+    """Return Jotform's workflowStatus field exactly as provided by the API.
+    No interpretation/derivation - raw passthrough only."""
+    return sub.get('workflowStatus', '')
+
+
+# ---------------- CONFIG (from environment variables) ----------------
+API_KEY        = os.environ['JOTFORM_API_KEY']
+FORM_ID        = os.environ['JOTFORM_FORM_ID']
+SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME', 'IRF Data sheet-version 2.0')
+WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME', 'IRF 2.0 Updated')
+CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
+
+JOTFORM_BASE_URL = 'https://pw.jotform.com/API/'
+JOTFORM_API_VERSION = 'v1'
+
+def get_form_submissions_raw(form_id, api_key, limit=200, offset=0, retries=3):
+    """
+    TEST VERSION: Fetch from the internal sheets/rows endpoint which includes
+    workflowStatus via addWorkflowStatus=1. Trying apiKey header auth first
+    to see if this internal endpoint accepts the same auth as the public API.
+    """
+    import json as _json
+    url = f"https://pw.jotform.com/API/sheets/{form_id}/sheet/{form_id}/view/{form_id}/rows"
+    filter_param = _json.dumps({"status:ne": ["ARCHIVED", "DELETED"]})
+    params = {
+        'filter': filter_param,
+        'orderby': 'created_at,desc',
+        'limit': limit,
+        'offset': offset,
+        'addAutomationRunHistory': 1,
+        'next5': 1,
+        'addWorkflowStatus': 1,
+        'skipWorkflowTaskExtraInfo': 1
+    }
+    headers = {
+        'apiKey': api_key,
+        'User-Agent': 'JOTFORM_PYTHON_WRAPPER'
+    }
+    for attempt in range(retries):
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=30)
+            print("DEBUG - status code:", resp.status_code)
+            print("DEBUG - response preview:", resp.text[:500])
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get('content', [])
+        except (RequestsConnectionError, requests.exceptions.RequestException) as e:
+            if attempt < retries - 1:
+                wait = 5 * (attempt + 1)
+                print(f"⚠️  Fetch failed (attempt {attempt + 1}/{retries}), retrying in {wait}s... [{e}]")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def append_with_retry(sheet, batch, retries=3):
@@ -30,22 +86,10 @@ def append_with_retry(sheet, batch, retries=3):
             else:
                 raise
 
-
-# ---------------- CONFIG (from environment variables) ----------------
-API_KEY        = os.environ['JOTFORM_API_KEY']
-FORM_ID        = os.environ['JOTFORM_FORM_ID']
-SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME', 'IRF Data sheet-version 2.0')
-WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME', 'IRF 2.0 Updated')
-CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
-
 TOTAL_LIMIT         = 8000
 PAGE_SIZE           = 200
 SLEEP_BETWEEN_CALLS = 1
 WRITE_BATCH_SIZE    = 500   # rows per Google Sheets API write call
-
-# ---------------- JOTFORM (custom enterprise server) ----------------
-jotform = JotformAPIClient(API_KEY)
-jotform.set_baseurl('https://pw.jotform.com/API/')
 
 # ---------------- GOOGLE SHEETS ----------------
 scope = [
@@ -72,12 +116,16 @@ if row_count > 1:
 print("🧹 Old data cleared (values only), header preserved")
 
 # ---------------- DISCOVER JOTFORM FIELDS ----------------
-first_batch = jotform.get_form_submissions(FORM_ID, limit=1, offset=0)
+first_batch = get_form_submissions_raw(FORM_ID, API_KEY, limit=1, offset=0)
 if not first_batch:
     raise Exception("No submissions found")
 
 first_sub    = first_batch[0]
 answers_meta = first_sub.get('answers', {})
+
+# TEMP DEBUG: confirm workflowStatus survives the raw fetch
+print("DEBUG - keys in first submission:", list(first_sub.keys()))
+print("DEBUG - workflowStatus value:", first_sub.get('workflowStatus', '<<MISSING>>'))
 
 header_to_qid = {}
 new_headers   = []
@@ -106,8 +154,9 @@ print("🚀 Fetching latest submissions...")
 
 while fetched < TOTAL_LIMIT:
     try:
-        submissions = jotform.get_form_submissions(
+        submissions = get_form_submissions_raw(
             FORM_ID,
+            API_KEY,
             limit=PAGE_SIZE,
             offset=offset
         )
@@ -120,12 +169,7 @@ while fetched < TOTAL_LIMIT:
                 'Submission ID':    sub.get('id'),
                 'Submission Date':  sub.get('created_at', ''),
                 'Last Update Date': sub.get('updated_at', ''),
-                'Approval Status':  (
-                    sub.get('workflowStatus')
-                    or sub.get('workflow_status')
-                    or sub.get('status')
-                    or ''
-                )
+                'Approval Status':  get_approval_status(sub)
             }
 
             answers = sub.get('answers', {})
