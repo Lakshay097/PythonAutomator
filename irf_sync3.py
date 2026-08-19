@@ -30,6 +30,8 @@ FETCH_RETRIES       = 6
 FETCH_BACKOFF_BASE  = 3       # bigger base -> longer waits: 3,9,27,81,243s...
 FETCH_MAX_WAIT       = 60     # cap any single wait at 60s
 
+HEADERS = ['Approval Status', 'Unique ID', 'Last Update Date']
+
 
 # ---------------- GOOGLE SHEETS ----------------
 scope = [
@@ -45,13 +47,6 @@ try:
     sheet = spreadsheet.worksheet(WORKSHEET_NAME)
 except WorksheetNotFound:
     sheet = spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows=1000, cols=10)
-
-headers = ['Approval Status', 'Unique ID', 'Last Update Date']
-
-# Only write headers if the sheet is empty — never clear existing data
-existing_values = sheet.get_all_values()
-if not existing_values:
-    sheet.update('A1', [headers])
 
 
 # ---------------- HELPERS ----------------
@@ -154,11 +149,14 @@ def extract_unique_id(answers):
     return ''
 
 
-def append_with_retry(sheet, batch, retries=3):
-    """Write a batch of rows to Google Sheets with retry on connection errors."""
+def write_batch_with_retry(sheet, batch, start_row, retries=3):
+    """Write a batch of rows starting at a specific row (update, not append),
+    with retry on connection errors."""
+    end_row = start_row + len(batch) - 1
+    range_str = f"A{start_row}:C{end_row}"
     for attempt in range(retries):
         try:
-            sheet.append_rows(batch, value_input_option='RAW')
+            sheet.update(range_str, batch, value_input_option='RAW')
             return
         except (RequestsConnectionError, Exception) as e:
             if attempt < retries - 1:
@@ -169,11 +167,19 @@ def append_with_retry(sheet, batch, retries=3):
                 raise
 
 
-# ---------------- FETCH (parallel, throttled) & WRITE (sequential, ordered) ----------------
-rows_buffer   = []
-total_written = 0
+# ---------------- FETCH EVERYTHING FIRST (parallel, throttled) ----------------
+# We deliberately fetch the FULL dataset into memory before touching the sheet.
+# START_DATE never advances between runs, so every run re-pulls the entire
+# range from Jotform - this is a full re-sync, not an incremental one. That
+# means the sheet should be fully rewritten each run, not appended to.
+#
+# We only clear/rewrite the sheet AFTER a successful full fetch, so a failed
+# or partial fetch never leaves the sheet wiped with incomplete data.
+
+all_rows      = []
 page          = 0
 stop_fetching = False
+fetch_failed  = False
 
 print(f"🚀 Fetching submissions with {MAX_WORKERS} parallel workers (throttled)...")
 
@@ -195,8 +201,9 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 print(f"❌ Error fetching page {p} (offset {p * PAGE_SIZE}): {e}")
 
         if fetch_error is not None:
-            print("Aborting sync. You can re-run the job to resume from the last written offset.")
+            print("❌ Aborting sync due to fetch error. Sheet was NOT touched — re-run the job when ready.")
             stop_fetching = True
+            fetch_failed = True
             break
 
         # Process results IN ORDER (page_num ascending) to keep row order deterministic
@@ -213,30 +220,35 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 unique_id        = extract_unique_id(answers)
                 last_update_date = sub.get('updated_at', '')
 
-                rows_buffer.append([
+                all_rows.append([
                     approval_status,
                     unique_id,
                     last_update_date
                 ])
 
-        # Flush buffer to Sheets whenever it reaches WRITE_BATCH_SIZE
-        if len(rows_buffer) >= WRITE_BATCH_SIZE:
-            append_with_retry(sheet, rows_buffer)
-            total_written += len(rows_buffer)
-            print(f"📝 Written {total_written} rows so far...")
-            rows_buffer = []
-            time.sleep(2)
-
         page += len(batch_page_nums)
-        print(f"✔ Pulled {total_written + len(rows_buffer)} rows so far (through page {page})...")
+        print(f"✔ Fetched {len(all_rows)} rows so far (through page {page})...")
 
         if not stop_fetching:
             print(f"⏳ Waiting {SLEEP_BETWEEN_BATCHES}s before next batch...")
             time.sleep(SLEEP_BETWEEN_BATCHES)
 
-# ---------------- FLUSH REMAINING ROWS ----------------
-if rows_buffer:
-    append_with_retry(sheet, rows_buffer)
-    total_written += len(rows_buffer)
+if fetch_failed:
+    raise SystemExit(1)
+
+
+# ---------------- CLEAR + REWRITE SHEET (only after full successful fetch) ----------------
+print(f"🧹 Fetch complete ({len(all_rows)} rows). Clearing sheet and rewriting...")
+sheet.clear()
+sheet.update('A1', [HEADERS])
+
+total_written = 0
+for i in range(0, len(all_rows), WRITE_BATCH_SIZE):
+    chunk = all_rows[i:i + WRITE_BATCH_SIZE]
+    start_row = i + 2  # +2 because row 1 is the header and rows are 1-indexed
+    write_batch_with_retry(sheet, chunk, start_row)
+    total_written += len(chunk)
+    print(f"📝 Written {total_written}/{len(all_rows)} rows so far...")
+    time.sleep(2)
 
 print(f"✅ DONE — Wrote {total_written} rows to '{SPREADSHEET_NAME}' -> '{WORKSHEET_NAME}'")
