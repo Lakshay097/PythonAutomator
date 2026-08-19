@@ -23,7 +23,7 @@ def get_approval_status(sub):
     return sub.get('workflowStatus', '')
 
 
-def get_form_submissions_raw(form_id, api_key, limit=200, offset=0, retries=3, debug=False):
+def get_form_submissions_raw(form_id, api_key, limit=100, offset=0, retries=3, debug=False):
     """
     TEST VERSION: Fetch from the internal sheets/rows endpoint (the one your
     browser DevTools showed), which includes workflowStatus via
@@ -85,13 +85,13 @@ def append_with_retry(sheet, batch, retries=3):
 
 # ---------------- CONFIG (from environment variables) ----------------
 API_KEY        = os.environ['JOTFORM_API_KEY']
-FORM_ID        = os.environ['JOTFORM_FORM_ID']
+FORM_ID        = os.environ.get('JOTFORM_FORM_ID', '231751320990049')  # <-- defaults to the form ID from your URL
 SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME_2', 'IRF_2.0_AdminSheet- 7 January 2026 onwards')
 WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME_2', 'IRF 2.0 Updated')
 CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
 
 TOTAL_LIMIT         = 8000
-PAGE_SIZE           = 200
+PAGE_SIZE           = 100   # matches the `limit=100` in your URL
 SLEEP_BETWEEN_CALLS = 1
 WRITE_BATCH_SIZE    = 500   # rows per Google Sheets API write call
 

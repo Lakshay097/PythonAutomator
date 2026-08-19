@@ -22,21 +22,18 @@ def get_approval_status(sub):
     return sub.get('workflowStatus', '')
 
 
-# ---------------- CONFIG (from environment variables) ----------------
-API_KEY        = os.environ['JOTFORM_API_KEY']
-FORM_ID        = os.environ['JOTFORM_FORM_ID']
-SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME', 'IRF Data sheet-version 2.0')
-WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME', 'IRF 2.0 Updated')
-CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
-
-JOTFORM_BASE_URL = 'https://pw.jotform.com/API/'
-JOTFORM_API_VERSION = 'v1'
-
-def get_form_submissions_raw(form_id, api_key, limit=200, offset=0, retries=3):
+def get_form_submissions_raw(form_id, api_key, limit=100, offset=0, retries=3):
     """
-    TEST VERSION: Fetch from the internal sheets/rows endpoint which includes
-    workflowStatus via addWorkflowStatus=1. Trying apiKey header auth first
-    to see if this internal endpoint accepts the same auth as the public API.
+    Fetch from the internal sheets/rows endpoint which includes
+    workflowStatus via addWorkflowStatus=1, matching:
+    https://pw.jotform.com/API/sheets/{form_id}/sheet/{form_id}/view/{form_id}/rows
+        ?filter={"status:ne":["ARCHIVED","DELETED"]}
+        &orderby=created_at,desc
+        &limit=100
+        &addAutomationRunHistory=1
+        &next5=1
+        &addWorkflowStatus=1
+        &skipWorkflowTaskExtraInfo=1
     """
     import json as _json
     url = f"https://pw.jotform.com/API/sheets/{form_id}/sheet/{form_id}/view/{form_id}/rows"
@@ -87,7 +84,7 @@ def append_with_retry(sheet, batch, retries=3):
                 raise
 
 TOTAL_LIMIT         = 8000
-PAGE_SIZE           = 200
+PAGE_SIZE           = 100   # matches the `limit=100` in your URL
 SLEEP_BETWEEN_CALLS = 1
 WRITE_BATCH_SIZE    = 500   # rows per Google Sheets API write call
 
@@ -96,7 +93,6 @@ scope = [
     'https://spreadsheets.google.com/feeds',
     'https://www.googleapis.com/auth/drive'
 ]
-creds  = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS, scope)
 client = gspread.authorize(creds)
 sheet  = client.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
 
