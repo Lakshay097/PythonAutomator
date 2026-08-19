@@ -55,29 +55,31 @@ def get_approval_status(sub):
     Return the human-readable approval status, matching what Jotform's own
     UI shows.
 
-    Jotform's raw `workflowStatus` field only holds a resolved value
-    (e.g. "Invalid Request", "Approved", "Denied") once the workflow has
-    reached that outcome. While a submission is still moving through the
-    approval chain, `workflowStatus` is just the generic engine state
-    "ACTIVE" and there's no `workflowStatusDetails` object at all - the
-    UI is the one that translates that generic "ACTIVE" into "In Progress".
+    IMPORTANT: `workflowStatusDetails` is NOT limited to resolved outcomes.
+    It is also present while a submission is still ACTIVE and mid-chain -
+    in that case `workflowStatusDetails.text` (e.g. "Approve") together
+    with `buttonColor` is the label/color of the ACTION BUTTON shown to
+    whichever approver needs to act next. It is a call-to-action, not a
+    record of what already happened, so it must never be surfaced as the
+    submission's status.
 
     Priority:
-      1. workflowStatusDetails.text - present for resolved outcomes
-         (Invalid Request, Approved, Denied, etc.) and is the exact label
-         Jotform's UI displays.
-      2. workflowStatus == "ACTIVE" -> "In Progress", to match the UI
-         when no resolved outcome exists yet.
+      1. workflowStatus == "ACTIVE" -> "In Progress", REGARDLESS of
+         whether workflowStatusDetails is present - a pending action
+         button does not mean the workflow resolved.
+      2. workflowStatusDetails.text - only trusted once workflowStatus is
+         NOT "ACTIVE", where it holds the true resolved outcome label
+         (e.g. "Invalid Request", "Approved", "Denied").
       3. Any other raw workflowStatus value, as-is.
       4. '' if neither field is present.
     """
-    details = sub.get('workflowStatusDetails') or {}
-    if details.get('text'):
-        return details['text']
-
     raw_status = sub.get('workflowStatus', '')
     if raw_status == 'ACTIVE':
         return 'In Progress'
+
+    details = sub.get('workflowStatusDetails') or {}
+    if details.get('text'):
+        return details['text']
 
     return raw_status
 
