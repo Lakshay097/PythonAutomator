@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import requests
 import gspread
@@ -17,39 +18,58 @@ def col_letter(n):
 
 
 def get_approval_status(sub):
-    """Return Jotform's workflowStatus field exactly as provided by the API.
-    No interpretation/derivation - raw passthrough only."""
-    return sub.get('workflowStatus', '')
+    """
+    Return the human-readable approval status, matching what Jotform's own
+    UI shows.
+
+    Jotform's raw `workflowStatus` field only holds a resolved value
+    (e.g. "Invalid Request", "Approved", "Denied") once the workflow has
+    reached that outcome. While a submission is still moving through the
+    approval chain, `workflowStatus` is just the generic engine state
+    "ACTIVE" and there's no `workflowStatusDetails` object at all - the
+    UI is the one that translates that generic "ACTIVE" into "In Progress".
+
+    Priority:
+      1. workflowStatusDetails.text - present for resolved outcomes
+         (Invalid Request, Approved, Denied, etc.) and is the exact label
+         Jotform's UI displays.
+      2. workflowStatus == "ACTIVE" -> "In Progress", to match the UI
+         when no resolved outcome exists yet.
+      3. Any other raw workflowStatus value, as-is.
+      4. '' if neither field is present.
+    """
+    details = sub.get('workflowStatusDetails') or {}
+    if details.get('text'):
+        return details['text']
+
+    raw_status = sub.get('workflowStatus', '')
+    if raw_status == 'ACTIVE':
+        return 'In Progress'
+
+    return raw_status
 
 
 def get_form_submissions_raw(form_id, api_key, limit=100, offset=0, retries=3):
     """
-    Fetch from the internal sheets/rows endpoint which includes
-    workflowStatus via addWorkflowStatus=1, matching:
-    https://pw.jotform.com/API/sheets/{form_id}/sheet/{form_id}/view/{form_id}/rows
-        ?filter={"status:ne":["ARCHIVED","DELETED"]}
-        &orderby=created_at,desc
-        &limit=100
-        &addAutomationRunHistory=1
-        &next5=1
-        &addWorkflowStatus=1
-        &skipWorkflowTaskExtraInfo=1
+    Fetch from Jotform's public /API/form/{id}/submissions endpoint.
+
+    This endpoint returns `workflowStatusDetails` alongside `workflowStatus`
+    when a submission's approval workflow has reached a resolved outcome
+    (e.g. "Invalid Request", "Approved", "Denied") - that's the field
+    get_approval_status() needs to show the same label Jotform's own UI
+    shows.
     """
-    import json as _json
-    url = f"https://pw.jotform.com/API/sheets/{form_id}/sheet/{form_id}/view/{form_id}/rows"
-    filter_param = _json.dumps({"status:ne": ["ARCHIVED", "DELETED"]})
+    url = f"https://pw.jotform.com/API/form/{form_id}/submissions"
+    filter_param = json.dumps({"status:ne": ["ARCHIVED", "DELETED"]})
     params = {
+        'apiKey': api_key,
         'filter': filter_param,
         'orderby': 'created_at,desc',
         'limit': limit,
         'offset': offset,
-        'addAutomationRunHistory': 1,
-        'next5': 1,
         'addWorkflowStatus': 1,
-        'skipWorkflowTaskExtraInfo': 1
     }
     headers = {
-        'apiKey': api_key,
         'User-Agent': 'JOTFORM_PYTHON_WRAPPER'
     }
     for attempt in range(retries):
@@ -129,6 +149,7 @@ answers_meta = first_sub.get('answers', {})
 # TEMP DEBUG: confirm workflowStatus survives the raw fetch
 print("DEBUG - keys in first submission:", list(first_sub.keys()))
 print("DEBUG - workflowStatus value:", first_sub.get('workflowStatus', '<<MISSING>>'))
+print("DEBUG - resolved Approval Status:", get_approval_status(first_sub))
 
 header_to_qid = {}
 new_headers   = []

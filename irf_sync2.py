@@ -18,36 +18,58 @@ def col_letter(n):
 
 
 def get_approval_status(sub):
-    """Return Jotform's workflowStatus field exactly as provided by the API.
-    No interpretation/derivation - raw passthrough only."""
-    return sub.get('workflowStatus', '')
+    """
+    Return the human-readable approval status, matching what Jotform's own
+    UI shows.
+
+    Jotform's raw `workflowStatus` field only holds a resolved value
+    (e.g. "Invalid Request", "Approved", "Denied") once the workflow has
+    reached that outcome. While a submission is still moving through the
+    approval chain, `workflowStatus` is just the generic engine state
+    "ACTIVE" and there's no `workflowStatusDetails` object at all - the
+    UI is the one that translates that generic "ACTIVE" into "In Progress".
+
+    Priority:
+      1. workflowStatusDetails.text - present for resolved outcomes
+         (Invalid Request, Approved, Denied, etc.) and is the exact label
+         Jotform's UI displays.
+      2. workflowStatus == "ACTIVE" -> "In Progress", to match the UI
+         when no resolved outcome exists yet.
+      3. Any other raw workflowStatus value, as-is.
+      4. '' if neither field is present.
+    """
+    details = sub.get('workflowStatusDetails') or {}
+    if details.get('text'):
+        return details['text']
+
+    raw_status = sub.get('workflowStatus', '')
+    if raw_status == 'ACTIVE':
+        return 'In Progress'
+
+    return raw_status
 
 
 def get_form_submissions_raw(form_id, api_key, limit=100, offset=0, retries=3, debug=False):
     """
-    TEST VERSION: Fetch from the internal sheets/rows endpoint (the one your
-    browser DevTools showed), which includes workflowStatus via
-    addWorkflowStatus=1. This is NOT the standard public /v1/form/{id}/submissions
-    endpoint - it's an internal admin endpoint. Trying apiKey header auth
-    (same as the public API) to see if it's accepted here too.
+    Fetch from Jotform's public /API/form/{id}/submissions endpoint.
 
-    If this fails with 401/403, the endpoint likely requires browser session
-    cookies instead of an apiKey, and this approach will need to change.
+    This endpoint (unlike the internal /API/sheets/.../rows endpoint) returns
+    `workflowStatusDetails` alongside `workflowStatus` when a submission's
+    approval workflow has reached a resolved outcome (e.g. "Invalid Request",
+    "Approved", "Denied") - that's the field get_approval_status() needs to
+    show the same label Jotform's own UI shows.
     """
-    url = f"https://pw.jotform.com/API/sheets/{form_id}/sheet/{form_id}/view/{form_id}/rows"
+    url = f"https://pw.jotform.com/API/form/{form_id}/submissions"
     filter_param = json.dumps({"status:ne": ["ARCHIVED", "DELETED"]})
     params = {
+        'apiKey': api_key,
         'filter': filter_param,
         'orderby': 'created_at,desc',
         'limit': limit,
         'offset': offset,
-        'addAutomationRunHistory': 1,
-        'next5': 1,
         'addWorkflowStatus': 1,
-        'skipWorkflowTaskExtraInfo': 1
     }
     headers = {
-        'apiKey': api_key,
         'User-Agent': 'JOTFORM_PYTHON_WRAPPER'
     }
     for attempt in range(retries):
@@ -85,7 +107,7 @@ def append_with_retry(sheet, batch, retries=3):
 
 # ---------------- CONFIG (from environment variables) ----------------
 API_KEY        = os.environ['JOTFORM_API_KEY']
-FORM_ID        = os.environ['JOTFORM_FORM_ID']
+FORM_ID        = os.environ.get('JOTFORM_FORM_ID', '231751320990049')  # <-- defaults to the form ID from your URL
 SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME_2', 'IRF_2.0_AdminSheet- 7 January 2026 onwards')
 WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME_2', 'IRF 2.0 Updated')
 CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
