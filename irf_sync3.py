@@ -529,7 +529,7 @@ if sheet.row_count < needed_rows:
     print(f"📐 Resizing sheet grid from {sheet.row_count} to {needed_rows} rows...")
     sheet.resize(rows=needed_rows)
 
-sheet.clear()
+sheet.batch_clear(['A:C'])
 sheet.update(range_name='A1', values=[HEADERS])
 
 total_written = 0
