@@ -2,10 +2,21 @@ name: Sync All Sheets (10 AM IST - Sequential)
 
 on:
   workflow_dispatch:
+    inputs:
+      sync:
+        description: "Which sync to run"
+        type: choice
+        default: all
+        options:
+          - all            # Steps 1 → 2 → 3 in sequence
+          - irf_sync       # Step 1 only
+          - irf_sync2      # Step 2 only
+          - irf_sync3      # Step 3 only
 
 jobs:
   sync-sheet-1:
     name: "Step 1 → IRF Data Sheet (irf_sync.py)"
+    if: ${{ inputs.sync == 'all' || inputs.sync == 'irf_sync' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -50,8 +61,15 @@ jobs:
 
   sync-sheet-2:
     name: "Step 2 → IRF AdminSheet (irf_sync2.py)"
-    runs-on: ubuntu-latest
     needs: sync-sheet-1
+    # always() lets this job run even when sync-sheet-1 was skipped (single-run mode).
+    # In "all" mode it only runs if step 1 succeeded.
+    if: >-
+      ${{ always() && (
+        (inputs.sync == 'all' && needs.sync-sheet-1.result == 'success') ||
+        inputs.sync == 'irf_sync2'
+      ) }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
@@ -95,8 +113,13 @@ jobs:
 
   sync-sheet-3:
     name: "Step 3 → Approval Status Sheet (irf_sync3.py)"
-    runs-on: ubuntu-latest
     needs: sync-sheet-2
+    if: >-
+      ${{ always() && (
+        (inputs.sync == 'all' && needs.sync-sheet-2.result == 'success') ||
+        inputs.sync == 'irf_sync3'
+      ) }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
