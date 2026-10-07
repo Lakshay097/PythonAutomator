@@ -90,6 +90,18 @@ def get_form_submissions_raw(form_id, api_key, limit=100, offset=0, retries=3, d
                 raise
 
 
+def get_created_date(sub):
+    """
+    Return the submission's created_at as a 'YYYY-MM-DD' string.
+
+    Jotform returns dates like '2026-10-07 14:23:01.000-05:00' or
+    '2026-10-07T14:23:01-05:00' - both start with the date, so the
+    first 10 characters are safe to compare lexicographically.
+    """
+    raw = str(sub.get('created_at', ''))
+    return raw[:10] if len(raw) >= 10 else ''
+
+
 def append_with_retry(sheet, batch, retries=3):
     """Write a batch of rows to Google Sheets with retry on connection errors."""
     for attempt in range(retries):
@@ -111,6 +123,10 @@ FORM_ID        = os.environ.get('JOTFORM_FORM_ID', '231751320990049')  # <-- def
 SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME_2', 'IRF_2.0_AdminSheet- 7 January 2026 onwards')
 WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME_2', 'IRF 2.0 Updated')
 CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
+
+# Only keep submissions created on/after this date (YYYY-MM-DD).
+# Set to '' (or the SINCE_DATE env var to '') to keep everything.
+SINCE_DATE = os.environ.get('SINCE_DATE', '2026-10-07')
 
 TOTAL_LIMIT         = 8000
 PAGE_SIZE           = 100   # matches the `limit=100` in your URL
@@ -190,7 +206,14 @@ while fetched < TOTAL_LIMIT:
         if not submissions:
             break
 
+        reached_cutoff = False
         for sub in submissions:
+            # Results are sorted newest-first, so the first submission
+            # older than SINCE_DATE means everything after it is too.
+            if SINCE_DATE and get_created_date(sub) < SINCE_DATE:
+                reached_cutoff = True
+                break
+
             row_data = {
                 'Submission ID':    sub.get('id'),
                 'Submission Date':  sub.get('created_at', ''),
@@ -214,6 +237,10 @@ while fetched < TOTAL_LIMIT:
             fetched += 1
             if fetched >= TOTAL_LIMIT:
                 break
+
+        if reached_cutoff:
+            print(f"🛑 Reached {SINCE_DATE} cutoff — stopping (older data skipped)")
+            break
 
         # Flush buffer to Sheets whenever it reaches WRITE_BATCH_SIZE
         if len(rows_buffer) >= WRITE_BATCH_SIZE:
