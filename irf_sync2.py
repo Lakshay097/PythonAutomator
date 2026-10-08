@@ -49,6 +49,22 @@ def get_approval_status(sub):
     return raw_status
 
 
+# ---------------- CONFIG (from environment variables) ----------------
+API_KEY        = os.environ['JOTFORM_API_KEY']
+FORM_ID        = os.environ.get('JOTFORM_FORM_ID', '231751320990049')  # <-- defaults to the form ID from your URL
+SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME_2', 'IRF_2.0_AdminSheet- 7 January 2026 onwards')
+WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME_2', 'IRF 2.0 Updated')
+CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
+
+TOTAL_LIMIT         = 8000
+# Only include submissions created BEFORE this moment (i.e. up to end of 7 Oct 2026).
+# NOTE: Jotform uses the account's timezone for created_at - adjust if needed.
+CUTOFF_EXCLUSIVE    = os.environ.get('JOTFORM_CUTOFF', '2026-10-08 00:00:00')
+PAGE_SIZE           = 100   # matches the `limit=100` in your URL
+SLEEP_BETWEEN_CALLS = 1
+WRITE_BATCH_SIZE    = 500   # rows per Google Sheets API write call
+
+
 def get_form_submissions_raw(form_id, api_key, limit=100, offset=0, retries=3, debug=False):
     """
     Fetch from Jotform's public /API/form/{id}/submissions endpoint.
@@ -58,9 +74,14 @@ def get_form_submissions_raw(form_id, api_key, limit=100, offset=0, retries=3, d
     approval workflow has reached a resolved outcome (e.g. "Invalid Request",
     "Approved", "Denied") - that's the field get_approval_status() needs to
     show the same label Jotform's own UI shows.
+
+    Only submissions created before CUTOFF_EXCLUSIVE are returned.
     """
     url = f"https://pw.jotform.com/API/form/{form_id}/submissions"
-    filter_param = json.dumps({"status:ne": ["ARCHIVED", "DELETED"]})
+    filter_param = json.dumps({
+        "status:ne": ["ARCHIVED", "DELETED"],
+        "created_at:lt": CUTOFF_EXCLUSIVE,
+    })
     params = {
         'apiKey': api_key,
         'filter': filter_param,
@@ -105,18 +126,6 @@ def append_with_retry(sheet, batch, retries=3):
                 raise
 
 
-# ---------------- CONFIG (from environment variables) ----------------
-API_KEY        = os.environ['JOTFORM_API_KEY']
-FORM_ID        = os.environ.get('JOTFORM_FORM_ID', '231751320990049')  # <-- defaults to the form ID from your URL
-SHEET_NAME     = os.environ.get('GOOGLE_SHEET_NAME_2', 'IRF_2.0_AdminSheet- 7 January 2026 onwards')
-WORKSHEET_NAME = os.environ.get('GOOGLE_WORKSHEET_NAME_2', 'IRF 2.0 Updated')
-CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
-
-TOTAL_LIMIT         = 8000
-PAGE_SIZE           = 100   # matches the `limit=100` in your URL
-SLEEP_BETWEEN_CALLS = 1
-WRITE_BATCH_SIZE    = 500   # rows per Google Sheets API write call
-
 # ---------------- GOOGLE SHEETS ----------------
 scope = [
     'https://spreadsheets.google.com/feeds',
@@ -140,6 +149,7 @@ if row_count > 1:
     sheet.batch_clear([f"A2:{last_col}{row_count}"])
 
 print("🧹 Old data cleared (values only), header preserved")
+print(f"📅 Only including submissions created before {CUTOFF_EXCLUSIVE}")
 
 # ---------------- DISCOVER JOTFORM FIELDS ----------------
 first_batch = get_form_submissions_raw(FORM_ID, API_KEY, limit=1, offset=0, debug=True)
@@ -191,6 +201,10 @@ while fetched < TOTAL_LIMIT:
             break
 
         for sub in submissions:
+            # Safety net: skip anything created on/after the cutoff
+            if sub.get('created_at', '') >= CUTOFF_EXCLUSIVE:
+                continue
+
             row_data = {
                 'Submission ID':    sub.get('id'),
                 'Submission Date':  sub.get('created_at', ''),
