@@ -126,7 +126,7 @@ CREDENTIALS    = os.environ.get('GOOGLE_CREDENTIALS_JSON', 'credentials.json')
 
 # Only keep submissions created on/after this date (YYYY-MM-DD).
 # Set to '' (or the SINCE_DATE env var to '') to keep everything.
-SINCE_DATE = os.environ.get('SINCE_DATE', '2026-10-08')
+SINCE_DATE = os.environ.get('SINCE_DATE', '2026-10-05')
 
 TOTAL_LIMIT         = 8000
 PAGE_SIZE           = 100   # matches the `limit=100` in your URL
